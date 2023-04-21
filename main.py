@@ -1,34 +1,63 @@
-import pynmrstar
-import numpy as np
-import matplotlib.pyplot as plt
+#!/usr/bin/env python
 import persim
+import pynmrstar
 import ripser
+import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
 from persim import wasserstein
+from typing import List
 
-# define function to generate persistence diagrams
-def persistence_diagrams(states):
-    diagrams = []
-    for state in states:
-        # compute persistence homology using ripser
-        diagrams.append(ripser.ripser(state, maxdim=1)['dgms'])
-    return diagrams
+def persistence_diagram(state: np.ndarray) -> np.ndarray:
+    """
+    Computes the persistence diagram of a single set of NMR chemical shifts.
+    """
+    return ripser.ripser(state, maxdim=1)['dgms']
 
-# read in NMR .str file using pyNMR-STAR
-nmr_file = pynmrstar.Entry.from_file('path/to/nmr_file.str')
+def obtain_chemical_shifts(star: str) -> List[np.ndarray]:
+    """
+    Reads STAR NMR file format and parses out relevant information.
+    """
+    nmr_file = pynmrstar.Entry.from_file(star)
+    
+    states = []
+    for chemical_shift in nmr_file.get_loops_by_category('Atom_chem_shift'):
+        state = np.array(
+                chemical_shift.get_tag(
+                    ['Comp_index_ID', 'Comp_ID', 'Atom_ID', 
+                        'Atom_type', 'Val', 'Val_err']
+                    )
+                )
+        states.append(state)
 
-# extract the ensemble of states from the NMR file
-states = []
-for model in nmr_file.get_loops_by_category('_atom_site'):
-    atoms = []
-    for row in model:
-        atoms.append([float(row['_atom_site.Cartn_x']),
-                      float(row['_atom_site.Cartn_y']),
-                      float(row['_atom_site.Cartn_z'])])
-    states.append(np.array(atoms))
+    return states
 
-# generate persistence diagrams
-diagrams = persistence_diagrams(states)
+def prep_shift_data(allshifts: List[np.ndarray]) -> List[np.ndarray]:
+    """
+    Extracts raw shift data from list of experimental data and returns 
+    list of persistence diagrams computed for each.
+    """
+    preprocessed = []
+    for shift in allshifts:
+        shift_data = shift[:,4].astype(np.float16)
+
+        # ripser requires 2d arrays; for 1d data we must reshape
+        if shift_data.ndim < 2:
+            shift_data = np.reshape(shift_data, 
+                                        (len(shift_data), 1))
+        preprocessed.append(persistence_diagram(shift_data))
+
+    return preprocessed
+
+file1 = '2m6q_cs.str'
+file2 = '7n82_cs.str'
+
+shifts1 = obtain_chemical_shifts(file1)
+shifts2 = obtain_chemical_shifts(file2)
+
+states = [shifts1[0], shifts2[0]]
+
+diagrams = prep_shift_data(states)
 
 # compute pairwise Wasserstein distances between persistence diagrams
 num_states = len(states)
